@@ -11,7 +11,9 @@ import static org.dspace.app.rest.utils.ContextUtil.obtainContext;
 import static org.dspace.app.rest.utils.RegexUtils.REGEX_REQUESTMAPPING_IDENTIFIER_AS_UUID;
 import static org.springframework.web.bind.annotation.RequestMethod.PUT;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.UUID;
@@ -23,6 +25,7 @@ import org.apache.catalina.connector.ClientAbortException;
 import org.apache.commons.collections4.ListUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.Logger;
+import org.apache.commons.lang3.tuple.Pair;
 import org.dspace.app.rest.converter.ConverterService;
 import org.dspace.app.rest.exception.DSpaceBadRequestException;
 import org.dspace.app.rest.model.BitstreamRest;
@@ -186,6 +189,97 @@ public class BitstreamRestController {
         }
         return null;
     }
+
+    @PreAuthorize("hasPermission(#uuid, 'BITSTREAM', 'READ')")
+    @RequestMapping( method = {RequestMethod.GET, RequestMethod.HEAD}, value = "content-extract/{startPage}/{endPage}")
+    public ResponseEntity extract(@PathVariable UUID uuid,
+                                  @PathVariable(required = false) int startPage,
+                                  @PathVariable(required = false) int endPage,HttpServletResponse response,
+                                  HttpServletRequest request) throws IOException, SQLException, AuthorizeException {
+        Context context = ContextUtil.obtainContext(request);
+
+        Bitstream bit = bitstreamService.find(context, uuid);
+        EPerson currentUser = context.getCurrentUser();
+
+        if (bit == null) {
+            response.sendError(HttpServletResponse.SC_NOT_FOUND);
+            return null;
+        }
+
+        Long lastModified = bitstreamService.getLastModified(bit);
+        BitstreamFormat format = bit.getFormat(context);
+        String mimetype = format.getMIMEType();
+        String name = getBitstreamName(bit, format);
+
+        if (StringUtils.isBlank(request.getHeader("Range"))) {
+            //We only log a download request when serving a request without Range header. This is because
+            //a browser always sends a regular request first to check for Range support.
+            eventService.fireEvent(
+                    new UsageEvent(
+                            UsageEvent.Action.VIEW,
+                            request,
+                            context,
+                            bit));
+        }
+
+        try {
+            long filesize = bit.getSizeBytes();
+            Boolean citationEnabledForBitstream = citationDocumentService.isCitationEnabledForBitstream(bit, context);
+
+            Pair<byte[],Long> result = citationDocumentService.filterByPages(context, bit, startPage, endPage);
+
+            HttpHeadersInitializer httpHeadersInitializer = new HttpHeadersInitializer()
+                    .withBufferSize(BUFFER_SIZE)
+                    .withFileName(name)
+                    .withChecksum(bit.getChecksum())
+                    .withLength(result.getRight())
+                    .withMimetype(mimetype)
+                    .with(request)
+                    .with(response);
+
+            if (lastModified != null) {
+                httpHeadersInitializer.withLastModified(lastModified);
+            }
+
+            //Determine if we need to send the file as a download or if the browser can open it inline
+            //The file will be downloaded if its size is larger than the configured threshold,
+            //or if its mimetype/extension appears in the "webui.content_disposition_format" config
+            long dispositionThreshold = configurationService.getLongProperty("webui.content_disposition_threshold");
+            if ((dispositionThreshold >= 0 && filesize > dispositionThreshold)
+                    || checkFormatForContentDisposition(format)) {
+                httpHeadersInitializer.withDisposition(HttpHeadersInitializer.CONTENT_DISPOSITION_ATTACHMENT);
+            }
+
+            org.dspace.app.rest.utils.BitstreamResource bitstreamResource =
+                    new org.dspace.app.rest.utils.BitstreamResource(name, uuid,
+                            currentUser != null ? currentUser.getID() : null,
+                            context.getSpecialGroupUuids(), citationEnabledForBitstream);
+
+            //We have all the data we need, close the connection to the database so that it doesn't stay open during
+            //download/streaming
+            context.complete();
+
+            //Send the data
+            if (httpHeadersInitializer.isValid()) {
+                HttpHeaders httpHeaders = httpHeadersInitializer.initialiseHeaders();
+
+                if (RequestMethod.HEAD.name().equals(request.getMethod())) {
+                    log.debug("HEAD request - no response body");
+                    return ResponseEntity.ok().headers(httpHeaders).build();
+                }
+                return ResponseEntity.ok().headers(httpHeaders).body(result.getLeft());
+            }
+
+        } catch (ClientAbortException ex) {
+            log.debug("Client aborted the request before the download was completed. " +
+                    "Client is probably switching to a Range request.", ex);
+        } catch (Exception e) {
+            throw e;
+        }
+        return null;
+
+    }
+
 
     private String getBitstreamName(Bitstream bit, BitstreamFormat format) {
         String name = bit.getName();

@@ -7,6 +7,7 @@
  */
 package org.dspace.app.iiif.service;
 
+import java.io.IOException;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
@@ -22,12 +23,14 @@ import org.dspace.app.iiif.model.generator.ManifestGenerator;
 import org.dspace.app.iiif.model.generator.RangeGenerator;
 import org.dspace.app.iiif.service.utils.IIIFUtils;
 import org.dspace.app.util.service.MetadataExposureService;
+import org.dspace.authorize.AuthorizeException;
 import org.dspace.content.Bitstream;
 import org.dspace.content.Bundle;
 import org.dspace.content.Item;
 import org.dspace.content.MetadataValue;
 import org.dspace.content.service.ItemService;
 import org.dspace.core.Context;
+import org.dspace.disseminate.service.CitationDocumentService;
 import org.dspace.services.ConfigurationService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -83,6 +86,10 @@ public class ManifestService extends AbstractResourceService {
 
     @Autowired
     MetadataExposureService metadataExposureService;
+
+
+    @Autowired
+    CitationDocumentService citationDocumentService;
 
     protected String[] METADATA_FIELDS;
 
@@ -319,6 +326,7 @@ public class ManifestService extends AbstractResourceService {
                 String mimeType = null;
                 try {
                     mimeType = bitstream.getFormat(context).getMIMEType();
+
                 } catch (SQLException e) {
                     e.printStackTrace();
                 }
@@ -328,10 +336,23 @@ public class ManifestService extends AbstractResourceService {
                 // field, e.g. iiif.rendering
                 if (mimeType != null && mimeType.contentEquals("application/pdf")) {
                     String id = BITSTREAM_PATH_PREFIX + "/" + bitstream.getID() + "/content";
+                    int num = 0;
+
+                    try {
+                        num = citationDocumentService.documentNumPages(context,bitstream);
+                    } catch (SQLException e) {
+                        e.printStackTrace();
+                    } catch (AuthorizeException e) {
+                        e.printStackTrace();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
                     manifestGenerator.addRendering(
                         new ExternalLinksGenerator(id)
-                            .setLabel(utils.getIIIFLabel(bitstream, bitstream.getName()))
+                            .setLabel("El documento entero ".concat ("( "+String.valueOf(num)+ " páginas )"))
                             .setFormat(mimeType)
+                            .setFormat(mimeType)
+                                .setNumPgs(num)
                     );
                 }
             }

@@ -25,6 +25,7 @@ public class ExternalLinksGenerator implements IIIFResource {
     private String format;
     private String label;
     private String type;
+    private int numPag = 0;
 
     public ExternalLinksGenerator(@NotNull String identifier) {
         if (identifier.isEmpty()) {
@@ -60,6 +61,15 @@ public class ExternalLinksGenerator implements IIIFResource {
         return this;
     }
 
+    /**
+     * Sets the optional type.
+     * @param numPag the annotation type
+     */
+    public ExternalLinksGenerator setNumPgs(int numPag) {
+        this.numPag = numPag;
+        return this;
+    }
+
     @Override
     public Resource<OtherContent> generateResource() {
         if (identifier == null) {
@@ -78,6 +88,10 @@ public class ExternalLinksGenerator implements IIIFResource {
             otherContent.setType(type);
         }
 
+        if(numPag > 0) {
+            // PDF properties num pages
+            otherContent.addAttribution("1",String.valueOf(numPag));
+        }
         return otherContent;
     }
 

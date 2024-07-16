@@ -62,6 +62,10 @@ public interface CitationDocumentService {
      */
     public boolean canGenerateCitationVersion(Context context, Bitstream bitstream) throws SQLException;
 
+
+    public Pair<byte[], Long> filterByPages(Context context,Bitstream bitstream, int startPage, int endPage) throws IOException, SQLException, AuthorizeException;
+
+    public int documentNumPages(Context context,Bitstream bitstream) throws IOException, SQLException, AuthorizeException;
     /**
      * Creates a
      * cited document from the given bitstream of the given item. This

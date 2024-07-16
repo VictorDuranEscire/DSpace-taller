@@ -326,6 +326,58 @@ public class CitationDocumentServiceImpl implements CitationDocumentService, Ini
         }
     }
 
+    @Override
+    public Pair<byte[], Long> filterByPages(Context context,Bitstream bitstream, int startPage, int endPage)
+        throws IOException, SQLException, AuthorizeException {
+
+        PDDocument document = new PDDocument();
+        PDDocument sourceDocument = new PDDocument();
+        try {
+            final InputStream inputStream = bitstreamService.retrieve(context, bitstream);
+            try {
+                sourceDocument = sourceDocument.load(inputStream);
+                for (int i = startPage - 1; i < endPage; i++) {
+                    PDPage page = sourceDocument.getPage(i);
+                    document.addPage(page);
+                }
+            } finally {
+                inputStream.close();
+            }
+            //We already have the full PDF in memory, so keep it there
+            try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+                document.save(out);
+
+                byte[] data = out.toByteArray();
+                return Pair.of(data, Long.valueOf(data.length));
+            }
+
+        } finally {
+            sourceDocument.close();
+            document.close();
+        }
+    }
+
+
+    public int documentNumPages(Context context,Bitstream bitstream)
+            throws IOException, SQLException, AuthorizeException {
+
+        PDDocument document = new PDDocument();
+        PDDocument sourceDocument = new PDDocument();
+        try {
+            final InputStream inputStream = bitstreamService.retrieve(context, bitstream);
+            try {
+                sourceDocument = sourceDocument.load(inputStream);
+
+            } finally {
+                inputStream.close();
+            }
+            return sourceDocument.getNumberOfPages();
+        } finally {
+            sourceDocument.close();
+            document.close();
+        }
+    }
+
     protected void generateCoverPage(Context context, PDDocument document, PDPage coverPage, Item item)
         throws IOException {
         PDPageContentStream contentStream = new PDPageContentStream(document, coverPage);
